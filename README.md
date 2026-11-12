@@ -1,6 +1,6 @@
 # Lampa Network Speed
 
-Плагин для [Lampa](https://github.com/yumata/lampa), который показывает текущую скорость загрузки в шапке рядом с часами.
+Плагин для [Lampa](https://github.com/yumata/lampa), который показывает текущую скорость загрузки в шапке Lampa.
 
 - Замер — скачивание тестового файла с `speed.cloudflare.com`, размер подстраивается под канал (200 КБ – 3 МБ)
 - Цвет кружка под качество видео (настройка «Цвет под качество»):
@@ -17,6 +17,14 @@
 ## Установка
 
 Настройки → Расширения → Добавить плагин:
+
+```
+https://victoradamovich.github.io/lampa-netspeed/netspeed.js
+```
+
+GitHub Pages, обновляется за пару минут после пуша.
+
+Запасная ссылка (jsDelivr, кэш до 12 часов):
 
 ```
 https://cdn.jsdelivr.net/gh/VictorAdamovich/lampa-netspeed@main/netspeed.js
