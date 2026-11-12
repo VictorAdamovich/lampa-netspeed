@@ -16,7 +16,14 @@
   var TARGET_MS = 1500;      // целимся в ~1.5 с на замер
 
   var PLUGIN_NAME = 'Скорость сети';
-  var PLUGIN_VERSION = '1.1.0';
+  var PLUGIN_VERSION = '1.2.0';
+
+  // Пороги цвета под качество видео, Мбит/с: [зелёный от, жёлтый от]
+  var QUALITY = {
+    uhd: { green: 50, yellow: 25, label: '4K' },
+    fhd: { green: 20, yellow: 10, label: 'Full HD' },
+    hd:  { green: 10, yellow: 5,  label: 'HD' }
+  };
 
   var bytes = 500000;
   var timer = null;
@@ -37,6 +44,10 @@
   // 'speed' — полный замер скорости, 'dot' — только кружок по пингу
   function getMode() {
     return Lampa.Storage.get('netspeed_mode', 'speed') === 'dot' ? 'dot' : 'speed';
+  }
+
+  function getQuality() {
+    return QUALITY[Lampa.Storage.get('netspeed_quality', 'fhd')] || QUALITY.fhd;
   }
 
   function getInterval() {
@@ -60,7 +71,9 @@
 
   function render(mbps) {
     if (mbps === null) return paint('off', getMode() === 'dot' ? '' : 'нет сети');
-    paint(mbps < 5 ? 'low' : mbps < 25 ? 'mid' : 'high', format(mbps) + ' Мбит/с');
+    var q = getQuality();
+    paint(mbps >= q.green ? 'high' : mbps >= q.yellow ? 'mid' : 'low', format(mbps) + ' Мбит/с');
+    if (el) el.setAttribute('title', 'Профиль ' + q.label + ': зелёный от ' + q.green + ', жёлтый от ' + q.yellow + ' Мбит/с');
   }
 
   function renderPing(ms) {
@@ -250,6 +263,25 @@
       field: {
         name: 'Режим',
         description: '«Только кружок» — без замера скорости, цвет по пингу, трафика почти нет'
+      },
+      onChange: schedule
+    });
+
+    Lampa.SettingsApi.addParam({
+      component: 'netspeed',
+      param: {
+        name: 'netspeed_quality',
+        type: 'select',
+        values: {
+          uhd: '4K — зелёный от 50, жёлтый от 25',
+          fhd: 'Full HD — зелёный от 20, жёлтый от 10',
+          hd: 'HD — зелёный от 10, жёлтый от 5'
+        },
+        default: 'fhd'
+      },
+      field: {
+        name: 'Цвет под качество',
+        description: 'Пороги цвета кружка в Мбит/с (только в режиме скорости)'
       },
       onChange: schedule
     });
