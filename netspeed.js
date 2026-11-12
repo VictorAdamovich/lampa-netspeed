@@ -16,7 +16,7 @@
   var TARGET_MS = 1500;      // целимся в ~1.5 с на замер
 
   var PLUGIN_NAME = 'Скорость сети';
-  var PLUGIN_VERSION = '1.2.0';
+  var PLUGIN_VERSION = '1.3.0';
 
   // Пороги цвета под качество видео, Мбит/с: [зелёный от, жёлтый от]
   var QUALITY = {
@@ -200,12 +200,11 @@
   function addStyles() {
     var css =
       '.head__netspeed{display:flex;align-items:center;padding:0 .8em;margin-right:.5em;' +
-      'font-size:1.3em;white-space:nowrap;border-radius:.5em;transition:opacity .2s}' +
-      '.head__netspeed.focus,.head__netspeed:hover{background:#fff;color:#000}' +
+      'font-size:1.3em;white-space:nowrap;transition:opacity .2s;pointer-events:none;cursor:default}' +
       '.head__netspeed.netspeed--busy{opacity:.5}' +
-      '.netspeed__dot{display:inline-block;width:.7em;height:.7em;border-radius:50%;' +
+      '.netspeed__dot{display:inline-block;width:.35em;height:.35em;border-radius:50%;' +
       'background:#9ca3af;flex-shrink:0}' +
-      '.netspeed__text{margin-left:.45em}' +
+      '.netspeed__text{margin-left:.35em}' +
       '.netspeed--low .netspeed__dot{background:#ff4d4f}' +
       '.netspeed--mid .netspeed__dot{background:#ffc53d}' +
       '.netspeed--high .netspeed__dot{background:#4ade80}' +
@@ -220,18 +219,16 @@
 
   function mount() {
     el = document.createElement('div');
-    el.className = 'head__netspeed selector';
+    // без класса selector: пульт не фокусирует индикатор, ховера нет
+    el.className = 'head__netspeed';
 
-    var time = document.querySelector('.head__time');
+    // первым в шапке — перед поиском и остальными иконками
     var actions = document.querySelector('.head__actions');
+    var time = document.querySelector('.head__time');
 
-    if (time && time.parentNode) time.parentNode.insertBefore(el, time);
-    else if (actions) actions.appendChild(el);
+    if (actions) actions.insertBefore(el, actions.firstChild);
+    else if (time && time.parentNode) time.parentNode.insertBefore(el, time);
     else document.body.appendChild(el);
-
-    // Enter на пульте / клик мышью — внеплановый замер
-    if (window.$) $(el).on('hover:enter', check);
-    el.addEventListener('click', check);
   }
 
   function addSettings() {
