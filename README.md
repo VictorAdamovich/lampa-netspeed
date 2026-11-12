@@ -13,7 +13,7 @@
 Настройки → Расширения → Добавить плагин:
 
 ```
-https://cdn.jsdelivr.net/gh/<USER>/<REPO>@main/netspeed.js
+https://cdn.jsdelivr.net/gh/VictorAdamovich/lampa-netspeed@main/netspeed.js
 ```
 
 > raw.githubusercontent.com не подойдёт — он отдаёт `text/plain`, и браузер не выполнит скрипт.
