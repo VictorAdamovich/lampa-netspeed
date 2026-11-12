@@ -11,13 +11,15 @@
   window.lampa_netspeed_plugin = true;
 
   var TEST_URL = 'https://speed.cloudflare.com/__down?bytes=';
-  var MIN_BYTES = 200000;    // 200 KB
-  var MAX_BYTES = 5000000;   // 5 MB — потолок, чтобы не жечь трафик
+  var STREAMS = 4;           // параллельных потоков, как в спидтестах
+  var MIN_BYTES = 250000;    // 250 KB на поток
+  var MAX_BYTES = 2500000;   // 2.5 MB на поток → до 10 MB на замер
   var TARGET_MS = 3000;      // целимся в ~3 с на замер
+  var RAMP_MS = 500;         // первые 0.5 с — разгон TCP, их не считаем
   var STARTUP_DELAY = 10000; // ждём, пока догрузится главная
 
   var PLUGIN_NAME = 'Скорость сети';
-  var PLUGIN_VERSION = '1.4.0';
+  var PLUGIN_VERSION = '1.5.0';
 
   // Пороги цвета под качество видео, Мбит/с: [зелёный от, жёлтый от]
   var QUALITY = {
@@ -26,7 +28,7 @@
     hd:  { green: 10, yellow: 5,  label: 'HD' }
   };
 
-  var bytes = 500000;
+  var bytes = 1000000;       // стартовый размер на поток
   var timer = null;
   var warmup = null;
   var busy = false;
@@ -119,6 +121,9 @@
     else measure();
   }
 
+  // Замер: STREAMS параллельных загрузок. Считаем байты только после разгона
+  // (RAMP_MS от первого байта) и до момента, когда закончился первый поток —
+  // пока все потоки ещё качают и канал загружен полностью.
   function measure() {
     if (busy || playing || document.hidden || !isEnabled()) return;
     if (navigator.onLine === false) return render(null);
@@ -126,62 +131,99 @@
     busy = true;
     if (el) el.classList.add('netspeed--testing');
 
-    var xhr = new XMLHttpRequest();
-    current = xhr;
+    var xhrs = [];
+    var loaded = [];
     var tStart = now();
-    var t0 = 0;
-    var b0 = 0;
+    var tFirst = 0;       // первый байт любого потока
+    var tRamp = 0;        // конец разгона
+    var bRamp = 0;        // сколько было скачано к концу разгона
+    var finished = false;
+
+    function sum() {
+      var t = 0;
+      for (var i = 0; i < loaded.length; i++) t += loaded[i];
+      return t;
+    }
+
+    function stopAll() {
+      for (var i = 0; i < xhrs.length; i++) {
+        xhrs[i].onabort = null;
+        try { xhrs[i].abort(); } catch (e) {}
+      }
+    }
 
     function done() {
+      finished = true;
       current = null;
       busy = false;
       if (el) el.classList.remove('netspeed--testing');
     }
 
-    xhr.open('GET', TEST_URL + bytes + '&r=' + Date.now(), true);
-    xhr.responseType = 'arraybuffer';
-    xhr.timeout = 20000;
-
-    // считаем от первого байта, чтобы пинг не занижал результат
-    xhr.onprogress = function (e) {
-      if (!t0) {
-        t0 = now();
-        b0 = e.loaded;
-      }
-    };
-
-    xhr.onload = function () {
+    function fail() {
+      if (finished) return;
+      stopAll();
       done();
-      if (xhr.status !== 200) return render(null);
+      render(null);
+    }
 
-      var t1 = now();
-      var total = xhr.response ? xhr.response.byteLength : bytes;
-      var dt = (t1 - t0) / 1000;
-      var db = total - b0;
+    function onProgress() {
+      var t = now();
+      if (!tFirst) tFirst = t;
+      if (!tRamp && t - tFirst >= RAMP_MS) {
+        tRamp = t;
+        bRamp = sum();
+      }
+    }
 
-      if (!t0 || dt < 0.05 || db < 50000) {
-        dt = (t1 - tStart) / 1000;
-        db = total;
+    function complete() {
+      if (finished) return;
+      var t = now();
+      var total = sum();
+      stopAll();
+      done();
+
+      var mbps;
+      if (tRamp && t - tRamp > 200 && total - bRamp > 100000) {
+        mbps = ((total - bRamp) * 8) / ((t - tRamp) / 1000) / 1e6;
+      } else {
+        // канал быстрее, чем успели разогнаться — считаем по всему времени
+        var from = tFirst || tStart;
+        mbps = (total * 8) / (Math.max(t - from, 50) / 1000) / 1e6;
       }
 
-      var mbps = (db * 8) / dt / 1e6;
-
-      // подстраиваем размер файла под скорость канала
-      var ms = t1 - tStart;
+      // подстраиваем размер под канал
+      var ms = t - tStart;
       if (ms < TARGET_MS / 2) bytes = Math.min(MAX_BYTES, bytes * 2);
       else if (ms > TARGET_MS * 2) bytes = Math.max(MIN_BYTES, Math.round(bytes / 2));
 
       render(mbps);
-    };
+    }
 
-    xhr.onerror = xhr.ontimeout = function () {
-      done();
-      render(null);
-    };
+    current = { abort: function () { if (!finished) { stopAll(); done(); } } };
 
-    xhr.onabort = done;
+    for (var i = 0; i < STREAMS; i++) {
+      (function (i) {
+        var xhr = new XMLHttpRequest();
+        xhrs.push(xhr);
+        loaded.push(0);
 
-    xhr.send();
+        xhr.open('GET', TEST_URL + bytes + '&r=' + Date.now() + '_' + i, true);
+        xhr.responseType = 'arraybuffer';
+        xhr.timeout = 20000;
+
+        xhr.onprogress = function (e) {
+          loaded[i] = e.loaded;
+          onProgress();
+        };
+        xhr.onload = function () {
+          if (xhr.status !== 200) return fail();
+          loaded[i] = xhr.response ? xhr.response.byteLength : bytes;
+          complete();
+        };
+        xhr.onerror = xhr.ontimeout = fail;
+        xhr.send();
+      })(i);
+    }
   }
 
   function schedule(initial) {
@@ -306,7 +348,7 @@
         values: { '15': '15 сек', '30': '30 сек', '60': '1 мин', '300': '5 мин' },
         default: '60'
       },
-      field: { name: 'Интервал проверки', description: 'В режиме скорости каждый замер качает до 3 МБ' },
+      field: { name: 'Интервал проверки', description: 'В режиме скорости каждый замер качает до 10 МБ' },
       onChange: function () { schedule(); }
     });
   }
