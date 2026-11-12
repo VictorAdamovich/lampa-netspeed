@@ -12,11 +12,12 @@
 
   var TEST_URL = 'https://speed.cloudflare.com/__down?bytes=';
   var MIN_BYTES = 200000;    // 200 KB
-  var MAX_BYTES = 3000000;   // 3 MB — потолок, чтобы не жечь трафик
-  var TARGET_MS = 1500;      // целимся в ~1.5 с на замер
+  var MAX_BYTES = 5000000;   // 5 MB — потолок, чтобы не жечь трафик
+  var TARGET_MS = 3000;      // целимся в ~3 с на замер
+  var STARTUP_DELAY = 10000; // ждём, пока догрузится главная
 
   var PLUGIN_NAME = 'Скорость сети';
-  var PLUGIN_VERSION = '1.3.0';
+  var PLUGIN_VERSION = '1.4.0';
 
   // Пороги цвета под качество видео, Мбит/с: [зелёный от, жёлтый от]
   var QUALITY = {
@@ -27,6 +28,7 @@
 
   var bytes = 500000;
   var timer = null;
+  var warmup = null;
   var busy = false;
   var el = null;
   var playing = false;
@@ -112,6 +114,7 @@
   }
 
   function check() {
+    if (warmup) return; // ещё ждём загрузки главной
     if (getMode() === 'dot') ping();
     else measure();
   }
@@ -121,7 +124,7 @@
     if (navigator.onLine === false) return render(null);
 
     busy = true;
-    if (el) el.classList.add('netspeed--busy');
+    if (el) el.classList.add('netspeed--testing');
 
     var xhr = new XMLHttpRequest();
     current = xhr;
@@ -132,7 +135,7 @@
     function done() {
       current = null;
       busy = false;
-      if (el) el.classList.remove('netspeed--busy');
+      if (el) el.classList.remove('netspeed--testing');
     }
 
     xhr.open('GET', TEST_URL + bytes + '&r=' + Date.now(), true);
@@ -181,8 +184,10 @@
     xhr.send();
   }
 
-  function schedule() {
+  function schedule(initial) {
     clearInterval(timer);
+    clearTimeout(warmup);
+    warmup = null;
     if (!el) return;
 
     if (!isEnabled()) {
@@ -192,16 +197,24 @@
 
     el.style.display = '';
     el.removeAttribute('title');
-    paint('wait', getMode() === 'dot' ? '' : '…');
-    check();
-    timer = setInterval(check, getInterval() * 1000);
+    paint('wait', '');
+
+    function go() {
+      warmup = null;
+      check();
+      timer = setInterval(check, getInterval() * 1000);
+    }
+
+    // при старте Lampa не мешаем грузиться главной
+    if (initial === true) warmup = setTimeout(go, STARTUP_DELAY);
+    else go();
   }
 
   function addStyles() {
     var css =
       '.head__netspeed{display:flex;align-items:center;padding:0 .8em;margin-right:.5em;' +
       'font-size:1.3em;white-space:nowrap;transition:opacity .2s;pointer-events:none;cursor:default}' +
-      '.head__netspeed.netspeed--busy{opacity:.5}' +
+      '@keyframes netspeed-pulse{0%,100%{opacity:1}50%{opacity:.2}}' +
       '.netspeed__dot{display:inline-block;width:.35em;height:.35em;border-radius:50%;' +
       'background:#9ca3af;flex-shrink:0}' +
       '.netspeed__text{margin-left:.35em}' +
@@ -209,7 +222,9 @@
       '.netspeed--mid .netspeed__dot{background:#ffc53d}' +
       '.netspeed--high .netspeed__dot{background:#4ade80}' +
       '.netspeed--off .netspeed__dot{background:#ff4d4f;opacity:.5}' +
-      '.netspeed--wait .netspeed__dot{background:#9ca3af}';
+      '.netspeed--wait .netspeed__dot{background:#9ca3af;animation:netspeed-pulse 1.6s ease-in-out infinite}' +
+      '.head__netspeed.netspeed--testing .netspeed__dot{background:#38bdf8;opacity:1;' +
+      'animation:netspeed-pulse .9s ease-in-out infinite}';
 
     var style = document.createElement('style');
     style.id = 'netspeed-style';
@@ -246,7 +261,7 @@
       component: 'netspeed',
       param: { name: 'netspeed_enabled', type: 'trigger', default: true },
       field: { name: 'Показывать индикатор', description: 'В шапке рядом с часами' },
-      onChange: schedule
+      onChange: function () { schedule(); }
     });
 
     Lampa.SettingsApi.addParam({
@@ -261,7 +276,7 @@
         name: 'Режим',
         description: '«Только кружок» — без замера скорости, цвет по пингу, трафика почти нет'
       },
-      onChange: schedule
+      onChange: function () { schedule(); }
     });
 
     Lampa.SettingsApi.addParam({
@@ -280,7 +295,7 @@
         name: 'Цвет под качество',
         description: 'Пороги цвета кружка в Мбит/с (только в режиме скорости)'
       },
-      onChange: schedule
+      onChange: function () { schedule(); }
     });
 
     Lampa.SettingsApi.addParam({
@@ -292,7 +307,7 @@
         default: '60'
       },
       field: { name: 'Интервал проверки', description: 'В режиме скорости каждый замер качает до 3 МБ' },
-      onChange: schedule
+      onChange: function () { schedule(); }
     });
   }
 
@@ -331,7 +346,7 @@
     addSettings();
     mount();
     watchPlayer();
-    schedule();
+    schedule(true);
 
     document.addEventListener('visibilitychange', function () {
       if (!document.hidden) check();
