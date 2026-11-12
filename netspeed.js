@@ -19,6 +19,8 @@
   var timer = null;
   var busy = false;
   var el = null;
+  var playing = false;
+  var current = null;
 
   function now() {
     return window.performance && performance.now ? performance.now() : Date.now();
@@ -54,18 +56,20 @@
   }
 
   function measure() {
-    if (busy || document.hidden || !isEnabled()) return;
+    if (busy || playing || document.hidden || !isEnabled()) return;
     if (navigator.onLine === false) return render(null);
 
     busy = true;
     if (el) el.classList.add('netspeed--busy');
 
     var xhr = new XMLHttpRequest();
+    current = xhr;
     var tStart = now();
     var t0 = 0;
     var b0 = 0;
 
     function done() {
+      current = null;
       busy = false;
       if (el) el.classList.remove('netspeed--busy');
     }
@@ -110,6 +114,8 @@
       done();
       render(null);
     };
+
+    xhr.onabort = done;
 
     xhr.send();
   }
@@ -195,10 +201,27 @@
     });
   }
 
+  // Пока открыт плеер — не меряем: замер мешает буферизации
+  // и показывает заниженную скорость из-за видеопотока.
+  function watchPlayer() {
+    if (!Lampa.Player || !Lampa.Player.listener) return;
+
+    Lampa.Player.listener.follow('start', function () {
+      playing = true;
+      if (current) current.abort();
+    });
+
+    Lampa.Player.listener.follow('destroy', function () {
+      playing = false;
+      setTimeout(measure, 1000);
+    });
+  }
+
   function start() {
     addStyles();
     addSettings();
     mount();
+    watchPlayer();
     schedule();
 
     document.addEventListener('visibilitychange', function () {
