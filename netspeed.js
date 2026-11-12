@@ -19,7 +19,7 @@
   var STARTUP_DELAY = 10000; // ждём, пока догрузится главная
 
   var PLUGIN_NAME = 'Скорость сети';
-  var PLUGIN_VERSION = '1.5.0';
+  var PLUGIN_VERSION = '1.6.0';
 
   // Пороги цвета под качество видео, Мбит/с: [зелёный от, жёлтый от]
   var QUALITY = {
@@ -264,7 +264,9 @@
       '.netspeed--mid .netspeed__dot{background:#ffc53d}' +
       '.netspeed--high .netspeed__dot{background:#4ade80}' +
       '.netspeed--off .netspeed__dot{background:#ff4d4f;opacity:.5}' +
-      '.netspeed--wait .netspeed__dot{background:#9ca3af;animation:netspeed-pulse 1.6s ease-in-out infinite}' +
+      // ожидание старта и сам замер — одна фаза: одинаковое голубое мигание,
+      // анимация не перезапускается при переходе
+      '.head__netspeed.netspeed--wait .netspeed__dot,' +
       '.head__netspeed.netspeed--testing .netspeed__dot{background:#38bdf8;opacity:1;' +
       'animation:netspeed-pulse .9s ease-in-out infinite}';
 
