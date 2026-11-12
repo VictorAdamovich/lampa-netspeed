@@ -15,6 +15,9 @@
   var MAX_BYTES = 3000000;   // 3 MB — потолок, чтобы не жечь трафик
   var TARGET_MS = 1500;      // целимся в ~1.5 с на замер
 
+  var PLUGIN_NAME = 'Скорость сети';
+  var PLUGIN_VERSION = '1.1.0';
+
   var bytes = 500000;
   var timer = null;
   var busy = false;
@@ -31,6 +34,11 @@
     return v === true || v === 'true';
   }
 
+  // 'speed' — полный замер скорости, 'dot' — только кружок по пингу
+  function getMode() {
+    return Lampa.Storage.get('netspeed_mode', 'speed') === 'dot' ? 'dot' : 'speed';
+  }
+
   function getInterval() {
     return parseInt(Lampa.Storage.get('netspeed_interval', '60'), 10) || 60;
   }
@@ -41,18 +49,58 @@
     return mbps.toFixed(2);
   }
 
-  function render(mbps) {
+  // level: 'low' | 'mid' | 'high' | 'off'
+  function paint(level, text) {
     if (!el) return;
-    el.classList.remove('netspeed--low', 'netspeed--mid', 'netspeed--high', 'netspeed--off');
+    el.classList.remove('netspeed--low', 'netspeed--mid', 'netspeed--high', 'netspeed--off', 'netspeed--wait');
+    el.classList.add('netspeed--' + level);
+    el.innerHTML = '<span class="netspeed__dot"></span>' +
+      (text ? '<span class="netspeed__text">' + text + '</span>' : '');
+  }
 
-    if (mbps === null) {
-      el.textContent = '↓ нет сети';
-      el.classList.add('netspeed--off');
-      return;
+  function render(mbps) {
+    if (mbps === null) return paint('off', getMode() === 'dot' ? '' : 'нет сети');
+    paint(mbps < 5 ? 'low' : mbps < 25 ? 'mid' : 'high', format(mbps) + ' Мбит/с');
+  }
+
+  function renderPing(ms) {
+    if (ms === null) return paint('off', '');
+    paint(ms < 150 ? 'high' : ms < 400 ? 'mid' : 'low', '');
+    if (el) el.setAttribute('title', 'Пинг ' + Math.round(ms) + ' мс');
+  }
+
+  // Лёгкая проверка: пустой запрос, меряем время ответа. Трафика ~0.
+  function ping() {
+    if (busy || playing || document.hidden || !isEnabled()) return;
+    if (navigator.onLine === false) return renderPing(null);
+
+    busy = true;
+    var xhr = new XMLHttpRequest();
+    current = xhr;
+    var t = now();
+
+    function done() {
+      current = null;
+      busy = false;
     }
 
-    el.textContent = '↓ ' + format(mbps) + ' Мбит/с';
-    el.classList.add(mbps < 5 ? 'netspeed--low' : mbps < 25 ? 'netspeed--mid' : 'netspeed--high');
+    xhr.open('GET', TEST_URL + '0&r=' + Date.now(), true);
+    xhr.timeout = 5000;
+    xhr.onload = function () {
+      done();
+      renderPing(xhr.status === 200 ? now() - t : null);
+    };
+    xhr.onerror = xhr.ontimeout = function () {
+      done();
+      renderPing(null);
+    };
+    xhr.onabort = done;
+    xhr.send();
+  }
+
+  function check() {
+    if (getMode() === 'dot') ping();
+    else measure();
   }
 
   function measure() {
@@ -130,8 +178,10 @@
     }
 
     el.style.display = '';
-    measure();
-    timer = setInterval(measure, getInterval() * 1000);
+    el.removeAttribute('title');
+    paint('wait', getMode() === 'dot' ? '' : '…');
+    check();
+    timer = setInterval(check, getInterval() * 1000);
   }
 
   function addStyles() {
@@ -140,12 +190,14 @@
       'font-size:1.3em;white-space:nowrap;border-radius:.5em;transition:opacity .2s}' +
       '.head__netspeed.focus,.head__netspeed:hover{background:#fff;color:#000}' +
       '.head__netspeed.netspeed--busy{opacity:.5}' +
-      '.head__netspeed.netspeed--low{color:#ff6b6b}' +
-      '.head__netspeed.netspeed--mid{color:#ffd166}' +
-      '.head__netspeed.netspeed--high{color:#4ade80}' +
-      '.head__netspeed.netspeed--off{color:#9ca3af}' +
-      '.head__netspeed.focus.netspeed--low,.head__netspeed.focus.netspeed--mid,' +
-      '.head__netspeed.focus.netspeed--high,.head__netspeed.focus.netspeed--off{color:#000}';
+      '.netspeed__dot{display:inline-block;width:.7em;height:.7em;border-radius:50%;' +
+      'background:#9ca3af;flex-shrink:0}' +
+      '.netspeed__text{margin-left:.45em}' +
+      '.netspeed--low .netspeed__dot{background:#ff4d4f}' +
+      '.netspeed--mid .netspeed__dot{background:#ffc53d}' +
+      '.netspeed--high .netspeed__dot{background:#4ade80}' +
+      '.netspeed--off .netspeed__dot{background:#ff4d4f;opacity:.5}' +
+      '.netspeed--wait .netspeed__dot{background:#9ca3af}';
 
     var style = document.createElement('style');
     style.id = 'netspeed-style';
@@ -156,7 +208,6 @@
   function mount() {
     el = document.createElement('div');
     el.className = 'head__netspeed selector';
-    el.textContent = '↓ …';
 
     var time = document.querySelector('.head__time');
     var actions = document.querySelector('.head__actions');
@@ -166,8 +217,8 @@
     else document.body.appendChild(el);
 
     // Enter на пульте / клик мышью — внеплановый замер
-    if (window.$) $(el).on('hover:enter', measure);
-    el.addEventListener('click', measure);
+    if (window.$) $(el).on('hover:enter', check);
+    el.addEventListener('click', check);
   }
 
   function addSettings() {
@@ -175,7 +226,7 @@
 
     Lampa.SettingsApi.addComponent({
       component: 'netspeed',
-      name: 'Скорость сети',
+      name: PLUGIN_NAME,
       icon:
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
         '<path d="M12 20l4-8"/><path d="M3.5 15a9 9 0 0 1 17 0"/></svg>'
@@ -184,7 +235,22 @@
     Lampa.SettingsApi.addParam({
       component: 'netspeed',
       param: { name: 'netspeed_enabled', type: 'trigger', default: true },
-      field: { name: 'Показывать скорость', description: 'Индикатор в шапке рядом с часами' },
+      field: { name: 'Показывать индикатор', description: 'В шапке рядом с часами' },
+      onChange: schedule
+    });
+
+    Lampa.SettingsApi.addParam({
+      component: 'netspeed',
+      param: {
+        name: 'netspeed_mode',
+        type: 'select',
+        values: { speed: 'Скорость (Мбит/с)', dot: 'Только кружок' },
+        default: 'speed'
+      },
+      field: {
+        name: 'Режим',
+        description: '«Только кружок» — без замера скорости, цвет по пингу, трафика почти нет'
+      },
       onChange: schedule
     });
 
@@ -196,7 +262,7 @@
         values: { '15': '15 сек', '30': '30 сек', '60': '1 мин', '300': '5 мин' },
         default: '60'
       },
-      field: { name: 'Интервал замера', description: 'Каждый замер качает до 3 МБ' },
+      field: { name: 'Интервал проверки', description: 'В режиме скорости каждый замер качает до 3 МБ' },
       onChange: schedule
     });
   }
@@ -213,11 +279,25 @@
 
     Lampa.Player.listener.follow('destroy', function () {
       playing = false;
-      setTimeout(measure, 1000);
+      setTimeout(check, 1000);
     });
   }
 
+  function addManifest() {
+    var manifest = {
+      type: 'other',
+      version: PLUGIN_VERSION,
+      name: PLUGIN_NAME,
+      description: 'Индикатор скорости сети в шапке',
+      component: 'netspeed'
+    };
+    try {
+      if (Lampa.Manifest) Lampa.Manifest.plugins = manifest;
+    } catch (e) {}
+  }
+
   function start() {
+    addManifest();
     addStyles();
     addSettings();
     mount();
@@ -225,9 +305,9 @@
     schedule();
 
     document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) measure();
+      if (!document.hidden) check();
     });
-    window.addEventListener('online', measure);
+    window.addEventListener('online', check);
     window.addEventListener('offline', function () { render(null); });
   }
 
